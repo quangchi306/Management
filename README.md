@@ -1,6 +1,6 @@
-# HTB Management – Writeup
+#Management – Writeup
 
-**Target:** `management.htb` / `sso.management.htb` (Linux, Easy/Medium)
+**Target:** `management.htb` / `sso.management.htb` (Linux)
 
 ## Summary
 
@@ -42,10 +42,10 @@ The tool injects a command via the `cmd` HTTP header and returns its output in t
 
 Using the RCE oracle to read files reveals the embedded **OpenDJ/OpenDS** LDAP backend (ports 50389 plaintext, 4444 admin/LDAPS):
 
-- `/opt/openam/config/boot.json` – LDAP bootstrap info: `cn=dsameuser,ou=DSAME Users,dc=management,dc=htb`, host `sso.management.htb`, port `50389`.
-- `/opt/openam/config/openam/.storepass` / `.keypass` – Java keystore passwords, tried (unsuccessfully) as LDAP Directory Manager credentials.
-- `/opt/openam/config/opends/config/config.ldif` – contains the Directory Manager's `{SSHA512}` hash. Both John the Ripper (`--format=nsldaps`) and Hashcat (modes 1711/111) fail against it with rockyou.
-- `/opt/openam/config/opends/db/userRoot/00000000.jdb` – the raw OpenDJ Berkeley DB backend file. `strings` on it surfaces an `{SSHA}` hash tied to `uid=demo,ou=people,dc=management,dc=htb`. John cracks this one (auto-detected as `nsldaps`/Salted-SHA1) to **`changeit`** — valid for the LDAP `demo` account, not an OS login.
+- `/opt/openam/config/boot.json` - LDAP bootstrap info: `cn=dsameuser,ou=DSAME Users,dc=management,dc=htb`, host `sso.management.htb`, port `50389`.
+- `/opt/openam/config/openam/.storepass` / `.keypass` - Java keystore passwords, tried (unsuccessfully) as LDAP Directory Manager credentials.
+- `/opt/openam/config/opends/config/config.ldif` - contains the Directory Manager's `{SSHA512}` hash. Both John the Ripper (`--format=nsldaps`) and Hashcat (modes 1711/111) fail against it with rockyou.
+- `/opt/openam/config/opends/db/userRoot/00000000.jdb` - the raw OpenDJ Berkeley DB backend file. `strings` on it surfaces an `{SSHA}` hash tied to `uid=demo,ou=people,dc=management,dc=htb`. John cracks this one (auto-detected as `nsldaps`/Salted-SHA1) to **`changeit`** — valid for the LDAP `demo` account, not an OS login.
 
 ## Pivot via GLPI
 
@@ -72,7 +72,7 @@ The password is stored encrypted at rest using GLPI's own internal encryption sc
 
 ## Decrypting the GLPI secret
 
-GLPI encrypts sensitive DB fields with its `GLPIKey` class, keyed by a raw 32-byte file at `/opt/glpi/config/glpicrypt.key`. Reading GLPI's own source confirms the exact primitive — libsodium **XChaCha20-Poly1305**, with the nonce reused as both the nonce and the AAD:
+GLPI encrypts sensitive DB fields with its `GLPIKey` class, keyed by a raw 32-byte file at `/opt/glpi/config/glpicrypt.key`. Reading GLPI's own source confirms the exact primitive - libsodium **XChaCha20-Poly1305**, with the nonce reused as both the nonce and the AAD:
 
 ```php
 $nonce = mb_substr($string, 0, SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_NPUBBYTES, '8bit');
@@ -119,7 +119,7 @@ sudo /usr/bin/rdiff-backup --server --restrict-path /opt/backup --restrict-mode 
 
 This starts cleanly (no argument-parsing error), confirming the override is accepted.
 
-`--server` mode speaks an RPC protocol over stdin/stdout and needs a counterpart client. Rather than using SSH, the unprivileged local `rdiff-backup` client is pointed at the sudo'd process via `--remote-schema` (which must contain a `%s` placeholder — satisfied harmlessly with a trailing shell comment):
+`--server` mode speaks an RPC protocol over stdin/stdout and needs a counterpart client. Rather than using SSH, the unprivileged local `rdiff-backup` client is pointed at the sudo'd process via `--remote-schema` (which must contain a `%s` placeholder - satisfied harmlessly with a trailing shell comment):
 
 ```bash
 mkdir -p /home/owen/root_backup
@@ -143,6 +143,6 @@ As a bonus, the same pull also copies root's `.ssh/id_ed25519` private key, givi
 
 - **Client-side encryption is not access control.** Embedding the AES key in the page HTML only delays discovery of `sso.management.htb`; it should be removed or the subdomain should require its own authentication gate.
 - **Patch OpenAM promptly.** CVE-2026-33439 is a pre-auth RCE; update to 16.0.6+ and monitor for repeat `jato.clientSession`-style deserialization bypasses, since this one bypassed an earlier fix (CVE-2021-35464).
-- **Don't store secrets in app-level "encryption" as a substitute for a secrets manager.** GLPI's `GLPIKey` scheme is sound cryptographically, but the key file sits next to the database config with the same exposure — compromising the app server defeats both at once.
+- **Don't store secrets in app-level "encryption" as a substitute for a secrets manager.** GLPI's `GLPIKey` scheme is sound cryptographically, but the key file sits next to the database config with the same exposure - compromising the app server defeats both at once.
 - **Sudoers wildcards are dangerous with multi-flag binaries.** A rule ending in `*` only constrains the literal text the admin wrote; it does nothing to stop an allowed binary from having its own earlier flags overridden by later ones on the same line. Pin the exact arguments with no trailing wildcard, or wrap the binary in a script that strips/validates arguments before invoking it.
-- **Treat `--restrict-path`-style sandboxes in backup tools as weak isolation**, not a security boundary — this limitation has been acknowledged by rdiff-backup's own author since 2001.
+- **Treat `--restrict-path`-style sandboxes in backup tools as weak isolation**, not a security boundary - this limitation has been acknowledged by rdiff-backup's own author since 2001.
